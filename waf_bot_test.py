@@ -6,6 +6,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
+from waf_comm import send_message
+
 # -------------------------
 # CONFIGURATION
 # -------------------------
@@ -77,9 +79,13 @@ def send_request():
     }
     try:
         r = requests.get(url, headers=headers, timeout=5)
-        print(f"[{r.status_code}] {url} ({headers['User-Agent']})")
+        msg = f"[{r.status_code}] {url} ({headers['User-Agent']})"
+        print(msg)
+        send_message("waf_bot_test", msg)
     except requests.RequestException as e:
-        print(f"[ERROR] {e}")
+        msg = f"[ERROR] {e}"
+        print(msg)
+        send_message("waf_bot_test", msg)
 
 def worker():
     for _ in range(REQUESTS_PER_THREAD):
