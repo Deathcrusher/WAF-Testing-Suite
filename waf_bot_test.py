@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-import requests
+import argparse
+import os
 import random
+import requests
 import string
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -9,10 +11,12 @@ from urllib.parse import quote
 # -------------------------
 # CONFIGURATION
 # -------------------------
-TARGET_URL = "https://yourtargetdomain.com"  
+TARGET_URL = "https://yourtargetdomain.com"
 THREADS = 10
 REQUESTS_PER_THREAD = 100
 DELAY_BETWEEN_REQUESTS = 0.5  # seconds
+VERIFY_TLS = True
+LOG_FILE = None
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -76,10 +80,14 @@ def send_request():
         "X-Forwarded-For": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
     }
     try:
-        r = requests.get(url, headers=headers, timeout=5)
-        print(f"[{r.status_code}] {url} ({headers['User-Agent']})")
+        r = requests.get(url, headers=headers, timeout=5, verify=VERIFY_TLS)
+        line = f"[{r.status_code}] {url} ({headers['User-Agent']})"
     except requests.RequestException as e:
-        print(f"[ERROR] {e}")
+        line = f"[ERROR] {e}"
+    print(line)
+    if LOG_FILE:
+        LOG_FILE.write(line + "\n")
+        LOG_FILE.flush()
 
 def worker():
     for _ in range(REQUESTS_PER_THREAD):
@@ -90,6 +98,29 @@ def worker():
 # MAIN
 # -------------------------
 if __name__ == "__main__":
-    with ThreadPoolExecutor(max_workers=THREADS) as executor:
-        for _ in range(THREADS):
-            executor.submit(worker)
+    parser = argparse.ArgumentParser(description="Bot & Injection traffic generator")
+    parser.add_argument("--target", default=TARGET_URL)
+    parser.add_argument("--threads", type=int, default=THREADS)
+    parser.add_argument("--rpt", type=int, default=REQUESTS_PER_THREAD, help="Requests per thread")
+    parser.add_argument("--delay", type=float, default=DELAY_BETWEEN_REQUESTS, help="Delay between requests")
+    parser.add_argument("--logdir", default=None, help="Directory to write bot_test.log")
+    parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS verification")
+    args = parser.parse_args()
+
+    TARGET_URL = args.target
+    THREADS = args.threads
+    REQUESTS_PER_THREAD = args.rpt
+    DELAY_BETWEEN_REQUESTS = args.delay
+    VERIFY_TLS = not args.insecure_tls
+
+    if args.logdir:
+        os.makedirs(args.logdir, exist_ok=True)
+        LOG_FILE = open(os.path.join(args.logdir, "bot_test.log"), "a")
+
+    try:
+        with ThreadPoolExecutor(max_workers=THREADS) as executor:
+            for _ in range(THREADS):
+                executor.submit(worker)
+    finally:
+        if LOG_FILE:
+            LOG_FILE.close()
