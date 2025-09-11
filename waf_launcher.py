@@ -15,7 +15,7 @@ import sys
 # CONFIGURATION
 # -------------------------
 TOOLS = [
-    {"name": "Bot & Injection Simulator", "script": "waf_bot_tester.py"},
+    {"name": "Bot & Injection Simulator", "script": "waf_bot_test.py", "cli": True},
     {"name": "Login Brute-Force Tester", "script": "waf_bruteforce_test.py"},
     {"name": "API & GraphQL Attack Tester", "script": "waf_api_tester.py"},
     {"name": "File Upload Tester", "script": "waf_file_upload_tester.py"},
@@ -41,7 +41,10 @@ def draw_menu(stdscr, selected_row_idx):
 
     # Header
     header = f" WAF Control Center ".center(w, "=")
-    params = f"Target: {TARGET_URL} | Threads: {THREADS} | RPT: {REQUESTS_PER_THREAD} | Logdir: {LOGDIR} | TLS-Insecure: {INSECURE_TLS}"
+    params = (
+        f"Target: {TARGET_URL} | Threads: {THREADS} | RPT: {REQUESTS_PER_THREAD} | "
+        f"Logdir: {LOGDIR} | TLS-Insecure: {INSECURE_TLS}"
+    )
     stdscr.addstr(0, 0, header, curses.color_pair(2))
     stdscr.addstr(1, 0, params, curses.color_pair(3))
 
@@ -64,7 +67,9 @@ def change_target(stdscr):
     global TARGET_URL
     curses.echo()
     stdscr.addstr(len(TOOLS)+4, 0, "Enter new target URL: ")
-    TARGET_URL = stdscr.getstr().decode().strip()
+    new_target = stdscr.getstr().decode().strip()
+    if new_target:
+        TARGET_URL = new_target
     curses.noecho()
 
 def change_options(stdscr):
@@ -104,6 +109,7 @@ def run_tool(stdscr, tool):
             cmd.append("--insecure-tls")
 
     try:
+        os.makedirs(LOGDIR, exist_ok=True)
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         h, w = stdscr.getmaxyx()
         y = 2
