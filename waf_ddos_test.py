@@ -18,24 +18,12 @@ import argparse
 from datetime import datetime
 from contextlib import suppress
 
-# -------------------------
-# CLI ARGUMENTS
-# -------------------------
-parser = argparse.ArgumentParser(description="WAF DDoS Stress Test Tool")
-parser.add_argument("--target", required=True, help="Target URL (e.g., https://example.com)")
-parser.add_argument("--threads", type=int, default=100, help="Number of threads")
-parser.add_argument("--rpt", type=int, default=100, help="Requests per thread")
-parser.add_argument("--logdir", default="./logs", help="Log directory")
-parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS certificate verification")
-args = parser.parse_args()
-
-TARGET_URL = args.target
-THREAD_COUNT = args.threads
-REQUESTS_PER_THREAD = args.rpt
-LOG_DIR = args.logdir
-INSECURE_TLS = args.insecure_tls
-
+TARGET_URL = ""
+THREAD_COUNT = 0
+REQUESTS_PER_THREAD = 0
+INSECURE_TLS = False
 LOG_BASENAME = "waf_stress_test"
+LOGGER = None
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -46,10 +34,10 @@ USER_AGENTS = [
 # -------------------------
 # LOGGING SETUP
 # -------------------------
-def _setup_logging():
-    os.makedirs(LOG_DIR, exist_ok=True)
+def _setup_logging(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    logfile = os.path.join(LOG_DIR, f"{LOG_BASENAME}_{timestamp}.log")
+    logfile = os.path.join(log_dir, f"{LOG_BASENAME}_{timestamp}.log")
 
     logger = logging.getLogger("waf_stress")
     logger.setLevel(logging.INFO)
@@ -66,8 +54,6 @@ def _setup_logging():
     logger.propagate = False
     logger.info(f"log_file={logfile}")
     return logger
-
-LOGGER = _setup_logging()
 
 # -------------------------
 # URL PARSER
@@ -184,6 +170,22 @@ def slowloris():
 # MAIN
 # -------------------------
 def main():
+    global TARGET_URL, THREAD_COUNT, REQUESTS_PER_THREAD, INSECURE_TLS, LOGGER
+
+    parser = argparse.ArgumentParser(description="WAF DDoS Stress Test Tool")
+    parser.add_argument("--target", required=True, help="Target URL (e.g., https://example.com)")
+    parser.add_argument("--threads", type=int, default=100, help="Number of threads")
+    parser.add_argument("--rpt", type=int, default=100, help="Requests per thread")
+    parser.add_argument("--logdir", default="./logs", help="Log directory")
+    parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS certificate verification")
+    args = parser.parse_args()
+
+    TARGET_URL = args.target
+    THREAD_COUNT = args.threads
+    REQUESTS_PER_THREAD = args.rpt
+    INSECURE_TLS = args.insecure_tls
+    LOGGER = _setup_logging(args.logdir)
+
     LOGGER.info(f"start target={TARGET_URL} threads={THREAD_COUNT} per_thread={REQUESTS_PER_THREAD}")
 
     threads = []

