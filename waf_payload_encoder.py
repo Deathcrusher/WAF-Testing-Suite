@@ -17,7 +17,7 @@ import os
 from queue import Queue
 import time
 
-from common import COMMON_PAYLOADS as PAYLOADS, thread_safe_log as log
+from common import COMMON_PAYLOADS as PAYLOADS, load_allowlist, thread_safe_log as log, validate_target
 
 BLOCK_KEYWORDS = ["blocked", "forbidden", "waf", "denied"]
 
@@ -48,8 +48,11 @@ def send_payload(payload, session, target_url, log_files):
     except Exception as e:
         log(log_files["error"], f"[ERROR] {payload} | {e}")
 
-def worker(queue, session, target_url, log_files, delay):
+def worker(queue, target_url, log_files, delay, stop_at):
+    session = requests.Session() if target_url else None
     while not queue.empty():
+        if stop_at and time.time() >= stop_at:
+            break
         try:
             payload = queue.get_nowait()
         except Exception:
@@ -68,6 +71,8 @@ def main():
     parser.add_argument("--threads", type=int, default=5, help="Number of threads for sending")
     parser.add_argument("--delay", type=float, default=0.3, help="Delay between requests")
     parser.add_argument("--logdir", default=".", help="Directory to store logs")
+    parser.add_argument("--max-seconds", type=int, default=0, help="Maximum runtime in seconds")
+    parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
     args = parser.parse_args()
 
     os.makedirs(args.logdir, exist_ok=True)
@@ -87,13 +92,18 @@ def main():
     print(f"[INFO] Generated {len(all_encoded)} encoded payloads.")
 
     if args.target:
+        try:
+            allowlist = load_allowlist(args.allowlist)
+            validate_target(args.target, allowlist)
+        except ValueError as exc:
+            parser.error(str(exc))
         q = Queue()
         for p in all_encoded:
             q.put(p)
-        session = requests.Session()
+        stop_at = time.time() + args.max_seconds if args.max_seconds > 0 else None
         threads = []
         for _ in range(args.threads):
-            t = threading.Thread(target=worker, args=(q, session, args.target, log_files, args.delay))
+            t = threading.Thread(target=worker, args=(q, args.target, log_files, args.delay, stop_at))
             t.start()
             threads.append(t)
         for t in threads:

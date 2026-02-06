@@ -7,9 +7,9 @@ import requests
 import string
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
-from common import COMMON_PAYLOADS
+from common import COMMON_PAYLOADS, load_allowlist, validate_target
 
 TARGET_URL = "https://yourtargetdomain.com"
 THREADS = 10
@@ -51,7 +51,7 @@ def build_url():
         random_string(4): random.choice(PAYLOADS) if random.random() < 0.5 else random_string(6)
         for _ in range(random.randint(1, 4))
     }
-    query = "&".join([f"{k}={v}" for k, v in params.items()])
+    query = urlencode(params, doseq=True)
     return f"{TARGET_URL}{path}?{query}"
 
 
@@ -69,9 +69,11 @@ def send_request(session):
     logger.info(line)
 
 
-def worker():
+def worker(stop_at):
     session = requests.Session()
     for _ in range(REQUESTS_PER_THREAD):
+        if stop_at and time.time() >= stop_at:
+            break
         send_request(session)
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
@@ -86,13 +88,21 @@ def main():
     parser.add_argument("--delay", type=float, default=DELAY_BETWEEN_REQUESTS, help="Delay between requests")
     parser.add_argument("--logdir", default=None, help="Directory to write bot_test.log")
     parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS verification")
+    parser.add_argument("--max-seconds", type=int, default=0, help="Maximum runtime in seconds")
+    parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
     args = parser.parse_args()
 
     TARGET_URL = args.target
+    try:
+        allowlist = load_allowlist(args.allowlist)
+        validate_target(TARGET_URL, allowlist)
+    except ValueError as exc:
+        parser.error(str(exc))
     THREADS = args.threads
     REQUESTS_PER_THREAD = args.rpt
     DELAY_BETWEEN_REQUESTS = args.delay
     VERIFY_TLS = not args.insecure_tls
+    stop_at = time.time() + args.max_seconds if args.max_seconds > 0 else None
 
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
@@ -107,7 +117,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for _ in range(THREADS):
-            executor.submit(worker)
+            executor.submit(worker, stop_at)
 
 
 if __name__ == "__main__":
