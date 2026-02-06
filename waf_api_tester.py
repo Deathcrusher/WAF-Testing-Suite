@@ -11,7 +11,7 @@ import os
 import requests
 import threading
 import time
-from queue import Queue
+from queue import Queue, Empty
 
 from common import COMMON_PAYLOADS as PAYLOADS, load_allowlist, thread_safe_log as log, validate_target
 
@@ -69,12 +69,12 @@ def test_graphql_api(target, session, log_files, delay, stop_at):
 
 def worker(target_queue, log_files, delay, stop_at):
     session = requests.Session()
-    while not target_queue.empty():
+    while True:
         if stop_at and time.time() >= stop_at:
             break
         try:
             target = target_queue.get_nowait()
-        except Exception:
+        except Empty:
             break
         if target["type"] == "rest":
             test_rest_api(target, session, log_files, delay, stop_at)

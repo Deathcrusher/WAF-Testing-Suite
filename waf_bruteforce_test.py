@@ -11,7 +11,7 @@ import os
 import requests
 import threading
 import time
-from queue import Queue
+from queue import Queue, Empty
 from common import load_allowlist, thread_safe_log as log, validate_target
 
 BLOCK_KEYWORDS = ["Too many attempts", "blocked", "captcha"]
@@ -42,12 +42,12 @@ def attempt_login(session, url, login_type, username, password, fields, log_file
 
 def worker(queue, url, login_type, fields, delay, log_files, stop_at):
     session = requests.Session()
-    while not queue.empty():
+    while True:
         if stop_at and time.time() >= stop_at:
             break
         try:
             username, password = queue.get_nowait()
-        except Exception:
+        except Empty:
             break
         attempt_login(session, url, login_type, username, password, fields, log_files)
         time.sleep(delay)
