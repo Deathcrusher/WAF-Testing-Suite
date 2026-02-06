@@ -8,7 +8,7 @@ import requests
 import shutil
 import threading
 import time
-from queue import Queue
+from queue import Queue, Empty
 
 from common import load_allowlist, thread_safe_log as log, validate_target
 
@@ -57,12 +57,12 @@ def upload_file(session, url, filepath, content_type, log_files):
 
 def worker(queue, url, delay, log_files, stop_at):
     session = requests.Session()
-    while not queue.empty():
+    while True:
         if stop_at and time.time() >= stop_at:
             break
         try:
             filepath, ctype = queue.get_nowait()
-        except Exception:
+        except Empty:
             break
         upload_file(session, url, filepath, ctype, log_files)
         time.sleep(delay)

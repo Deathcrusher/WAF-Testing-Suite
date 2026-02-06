@@ -14,7 +14,7 @@ import urllib.parse
 import html
 import threading
 import os
-from queue import Queue
+from queue import Queue, Empty
 import time
 
 from common import COMMON_PAYLOADS as PAYLOADS, load_allowlist, thread_safe_log as log, validate_target
@@ -50,12 +50,12 @@ def send_payload(payload, session, target_url, log_files):
 
 def worker(queue, target_url, log_files, delay, stop_at):
     session = requests.Session() if target_url else None
-    while not queue.empty():
+    while True:
         if stop_at and time.time() >= stop_at:
             break
         try:
             payload = queue.get_nowait()
-        except Exception:
+        except Empty:
             break
         if target_url:
             send_payload(payload, session, target_url, log_files)

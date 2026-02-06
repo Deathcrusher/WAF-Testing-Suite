@@ -33,6 +33,11 @@ LOGDIR = "./logs"
 INSECURE_TLS = False
 MAX_SECONDS = "60"
 ACK_AUTH = False
+LOGIN_TYPE = "form"
+USER_FIELD = "username"
+PASS_FIELD = "password"
+USERNAMES_FILE = "usernames.txt"
+PASSWORDS_FILE = "passwords.txt"
 
 # -------------------------
 # FUNCTIONS
@@ -77,6 +82,7 @@ def change_target(stdscr):
 
 def change_options(stdscr):
     global THREADS, REQUESTS_PER_THREAD, LOGDIR, INSECURE_TLS, MAX_SECONDS, ACK_AUTH
+    global LOGIN_TYPE, USER_FIELD, PASS_FIELD, USERNAMES_FILE, PASSWORDS_FILE
     curses.echo()
     stdscr.addstr(len(TOOLS)+4, 0, "Threads: ")
     THREADS = stdscr.getstr().decode().strip() or THREADS
@@ -90,6 +96,16 @@ def change_options(stdscr):
     MAX_SECONDS = stdscr.getstr().decode().strip() or MAX_SECONDS
     stdscr.addstr(len(TOOLS)+9, 0, "Ack authorized? (y/N): ")
     ACK_AUTH = stdscr.getstr().decode().strip().lower() == "y"
+    stdscr.addstr(len(TOOLS)+10, 0, "Login type (form/json): ")
+    LOGIN_TYPE = stdscr.getstr().decode().strip() or LOGIN_TYPE
+    stdscr.addstr(len(TOOLS)+11, 0, "User field: ")
+    USER_FIELD = stdscr.getstr().decode().strip() or USER_FIELD
+    stdscr.addstr(len(TOOLS)+12, 0, "Pass field: ")
+    PASS_FIELD = stdscr.getstr().decode().strip() or PASS_FIELD
+    stdscr.addstr(len(TOOLS)+13, 0, "Usernames file: ")
+    USERNAMES_FILE = stdscr.getstr().decode().strip() or USERNAMES_FILE
+    stdscr.addstr(len(TOOLS)+14, 0, "Passwords file: ")
+    PASSWORDS_FILE = stdscr.getstr().decode().strip() or PASSWORDS_FILE
     curses.noecho()
 
 def run_tool(stdscr, tool):
@@ -102,6 +118,15 @@ def run_tool(stdscr, tool):
         stdscr.addstr(2, 0, f"[ERROR] Script {tool['script']} not found!", curses.color_pair(4))
         stdscr.getch()
         return
+    if tool["script"] == "waf_bruteforce_test.py":
+        if not os.path.isfile(USERNAMES_FILE):
+            stdscr.addstr(2, 0, f"[ERROR] Usernames file not found: {USERNAMES_FILE}", curses.color_pair(4))
+            stdscr.getch()
+            return
+        if not os.path.isfile(PASSWORDS_FILE):
+            stdscr.addstr(2, 0, f"[ERROR] Passwords file not found: {PASSWORDS_FILE}", curses.color_pair(4))
+            stdscr.getch()
+            return
 
     cmd = [PYTHON, script_path]
 
@@ -119,6 +144,33 @@ def run_tool(stdscr, tool):
             if ACK_AUTH:
                 cmd.append("--ack")
 
+    if tool["script"] == "waf_api_tester.py":
+        cmd.extend([
+            "--rest", f"GET:{TARGET_URL}",
+            "--threads", THREADS,
+            "--logdir", LOGDIR,
+            "--max-seconds", MAX_SECONDS,
+        ])
+
+    if tool["script"] == "waf_bruteforce_test.py":
+        cmd.extend([
+            "--url", TARGET_URL,
+            "--login-type", LOGIN_TYPE,
+            "--user-field", USER_FIELD,
+            "--pass-field", PASS_FIELD,
+            "--usernames", USERNAMES_FILE,
+            "--passwords", PASSWORDS_FILE,
+            "--threads", THREADS,
+            "--logdir", LOGDIR,
+            "--max-seconds", MAX_SECONDS,
+        ])
+    if tool["script"] == "waf_file_upload_tester.py":
+        cmd.extend([
+            "--url", TARGET_URL,
+            "--threads", THREADS,
+            "--logdir", LOGDIR,
+            "--max-seconds", MAX_SECONDS,
+        ])
     try:
         os.makedirs(LOGDIR, exist_ok=True)
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
