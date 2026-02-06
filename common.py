@@ -42,3 +42,10 @@ def validate_target(url: str, allowlist: set[str] | None = None) -> str:
     if allowlist is not None and host not in allowlist:
         raise ValueError(f"Target host '{host}' is not in the allowlist.")
     return host
+
+def parse_csv_list(value: str | None, default: list[str]) -> list[str]:
+    """Parse a comma-separated list string, returning defaults when empty."""
+    if not value:
+        return list(default)
+    items = [item.strip() for item in value.split(",")]
+    return [item for item in items if item]

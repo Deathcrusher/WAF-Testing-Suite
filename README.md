@@ -29,8 +29,8 @@ Each script provides `--help` output detailing available options. Examples:
 
 ```bash
 python waf_bot_test.py --target https://example.com --threads 20 --logdir ./logs
-python waf_api_tester.py --rest GET:https://example.com/api --threads 5 --max-seconds 60
-python waf_bruteforce_test.py --url https://example.com/login --usernames users.txt --passwords pw.txt --max-seconds 120
+python waf_api_tester.py --rest GET:https://example.com/api --threads 5 --max-seconds 60 --block-keywords blocked,forbidden
+python waf_bruteforce_test.py --url https://example.com/login --usernames users.txt --passwords pw.txt --max-seconds 120 --block-keywords captcha,blocked --success-keywords token,success
 python waf_file_upload_tester.py --url https://example.com/upload --testdir ./tmp_files --cleanup
 python waf_ddos_test.py --target https://example.com --threads 50 --rpt 50 --max-seconds 30 --ack
 python waf_payload_encoder.py --target https://example.com --allowlist allowlist.txt --max-seconds 30

@@ -12,16 +12,17 @@ import requests
 import threading
 import time
 from queue import Queue, Empty
-from common import load_allowlist, thread_safe_log as log, validate_target
+from common import load_allowlist, parse_csv_list, thread_safe_log as log, validate_target
 
 BLOCK_KEYWORDS = ["Too many attempts", "blocked", "captcha"]
 SUCCESS_KEYWORDS = ["Welcome", "Dashboard", "token", "success"]
+BLOCK_STATUS_CODES = {401, 403, 429}
 
 # -------------------------------------------------------------
 # Worker logic
 # -------------------------------------------------------------
 
-def attempt_login(session, url, login_type, username, password, fields, log_files):
+def attempt_login(session, url, login_type, username, password, fields, log_files, block_keywords, success_keywords):
     try:
         if login_type == "form":
             data = {fields['user']: username, fields['pass']: password}
@@ -31,16 +32,17 @@ def attempt_login(session, url, login_type, username, password, fields, log_file
             r = session.post(url, json=payload, timeout=5)
         body = r.text
         status = r.status_code
-        if any(b.lower() in body.lower() for b in BLOCK_KEYWORDS):
-            log(log_files["block"], f"{username}:{password} | BLOCKED")
-        elif any(s.lower() in body.lower() for s in SUCCESS_KEYWORDS):
-            log(log_files["success"], f"{username}:{password} | SUCCESS")
+        body_lower = body.lower()
+        if status in BLOCK_STATUS_CODES or any(b.lower() in body_lower for b in block_keywords):
+            log(log_files["block"], f"{username}:{password} | BLOCKED ({status})")
+        elif any(s.lower() in body_lower for s in success_keywords):
+            log(log_files["success"], f"{username}:{password} | SUCCESS ({status})")
         else:
             log(log_files["fail"], f"{username}:{password} | FAIL ({status})")
     except requests.RequestException as e:
         log(log_files["error"], f"{username}:{password} | {e}")
 
-def worker(queue, url, login_type, fields, delay, log_files, stop_at):
+def worker(queue, url, login_type, fields, delay, log_files, stop_at, block_keywords, success_keywords):
     session = requests.Session()
     while True:
         if stop_at and time.time() >= stop_at:
@@ -49,7 +51,17 @@ def worker(queue, url, login_type, fields, delay, log_files, stop_at):
             username, password = queue.get_nowait()
         except Empty:
             break
-        attempt_login(session, url, login_type, username, password, fields, log_files)
+        attempt_login(
+            session,
+            url,
+            login_type,
+            username,
+            password,
+            fields,
+            log_files,
+            block_keywords,
+            success_keywords,
+        )
         time.sleep(delay)
 
 # -------------------------------------------------------------
@@ -69,6 +81,8 @@ def main():
     parser.add_argument("--logdir", default=".")
     parser.add_argument("--max-seconds", type=int, default=0, help="Maximum runtime in seconds")
     parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
+    parser.add_argument("--block-keywords", help="Comma-separated keywords to detect WAF blocks")
+    parser.add_argument("--success-keywords", help="Comma-separated keywords to detect successful logins")
     args = parser.parse_args()
 
     try:
@@ -97,6 +111,8 @@ def main():
         "block": f"{args.logdir}/waf_blocks.txt",
         "error": f"{args.logdir}/login_errors.txt",
     }
+    block_keywords = parse_csv_list(args.block_keywords, BLOCK_KEYWORDS)
+    success_keywords = parse_csv_list(args.success_keywords, SUCCESS_KEYWORDS)
 
     threads = []
     fields = {"user": args.user_field, "pass": args.pass_field}
@@ -104,7 +120,17 @@ def main():
     for _ in range(args.threads):
         t = threading.Thread(
             target=worker,
-            args=(combo_queue, args.url, args.login_type, fields, args.delay, log_files, stop_at),
+            args=(
+                combo_queue,
+                args.url,
+                args.login_type,
+                fields,
+                args.delay,
+                log_files,
+                stop_at,
+                block_keywords,
+                success_keywords,
+            ),
         )
         t.start()
         threads.append(t)

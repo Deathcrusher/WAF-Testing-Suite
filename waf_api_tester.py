@@ -13,18 +13,28 @@ import threading
 import time
 from queue import Queue, Empty
 
-from common import COMMON_PAYLOADS as PAYLOADS, load_allowlist, thread_safe_log as log, validate_target
+from common import (
+    COMMON_PAYLOADS as PAYLOADS,
+    load_allowlist,
+    parse_csv_list,
+    thread_safe_log as log,
+    validate_target,
+)
 
 BLOCK_KEYWORDS = ["blocked", "forbidden", "waf", "too many requests", "access denied"]
+BLOCK_STATUS_CODES = {401, 403, 429}
 
 # -------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------
 
-def detect_waf_block(response_text: str) -> bool:
-    return any(kw.lower() in response_text.lower() for kw in BLOCK_KEYWORDS)
+def detect_waf_block(response_text: str, status_code: int, block_keywords: list[str]) -> bool:
+    if status_code in BLOCK_STATUS_CODES:
+        return True
+    response_lower = response_text.lower()
+    return any(kw.lower() in response_lower for kw in block_keywords)
 
-def test_rest_api(target, session, log_files, delay, stop_at):
+def test_rest_api(target, session, log_files, delay, stop_at, block_keywords):
     url = target["url"]
     method = target["method"].upper()
     for payload in PAYLOADS:
@@ -38,15 +48,15 @@ def test_rest_api(target, session, log_files, delay, stop_at):
                 r = session.post(url, headers=headers, json={"test": payload}, timeout=5)
             else:
                 continue
-            if detect_waf_block(r.text):
-                log(log_files["block"], f"[BLOCK] {url} | Payload: {payload}")
+            if detect_waf_block(r.text, r.status_code, block_keywords):
+                log(log_files["block"], f"[BLOCK] {url} | Payload: {payload} | Status: {r.status_code}")
             else:
                 log(log_files["success"], f"[PASS] {url} | Payload: {payload} | Status: {r.status_code}")
         except requests.RequestException as e:
             log(log_files["error"], f"[ERROR] {url} | {e}")
         time.sleep(delay)
 
-def test_graphql_api(target, session, log_files, delay, stop_at):
+def test_graphql_api(target, session, log_files, delay, stop_at, block_keywords):
     url = target["url"]
     queries = [
         {"query": "{ __schema { types { name } } }"},
@@ -59,15 +69,15 @@ def test_graphql_api(target, session, log_files, delay, stop_at):
         try:
             headers = {"Content-Type": "application/json"}
             r = session.post(url, headers=headers, json=gql_payload, timeout=5)
-            if detect_waf_block(r.text):
-                log(log_files["block"], f"[BLOCK] {url} | GraphQL: {gql_payload}")
+            if detect_waf_block(r.text, r.status_code, block_keywords):
+                log(log_files["block"], f"[BLOCK] {url} | GraphQL: {gql_payload} | Status: {r.status_code}")
             else:
                 log(log_files["success"], f"[PASS] {url} | GraphQL: {gql_payload} | Status: {r.status_code}")
         except requests.RequestException as e:
             log(log_files["error"], f"[ERROR] {url} | {e}")
         time.sleep(delay)
 
-def worker(target_queue, log_files, delay, stop_at):
+def worker(target_queue, log_files, delay, stop_at, block_keywords):
     session = requests.Session()
     while True:
         if stop_at and time.time() >= stop_at:
@@ -77,9 +87,9 @@ def worker(target_queue, log_files, delay, stop_at):
         except Empty:
             break
         if target["type"] == "rest":
-            test_rest_api(target, session, log_files, delay, stop_at)
+            test_rest_api(target, session, log_files, delay, stop_at, block_keywords)
         elif target["type"] == "graphql":
-            test_graphql_api(target, session, log_files, delay, stop_at)
+            test_graphql_api(target, session, log_files, delay, stop_at, block_keywords)
 
 def parse_targets(args, allowlist):
     targets = []
@@ -113,6 +123,7 @@ def main():
     parser.add_argument("--logdir", default=".", help="Directory for log files")
     parser.add_argument("--max-seconds", type=int, default=0, help="Maximum runtime in seconds")
     parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
+    parser.add_argument("--block-keywords", help="Comma-separated keywords to detect WAF blocks")
     args = parser.parse_args()
 
     try:
@@ -129,6 +140,7 @@ def main():
         "success": os.path.join(logdir, "api_success.txt"),
         "error": os.path.join(logdir, "api_errors.txt"),
     }
+    block_keywords = parse_csv_list(args.block_keywords, BLOCK_KEYWORDS)
 
     target_queue = Queue()
     for t in targets:
@@ -137,7 +149,10 @@ def main():
     stop_at = time.time() + args.max_seconds if args.max_seconds > 0 else None
     workers = []
     for _ in range(threads):
-        t = threading.Thread(target=worker, args=(target_queue, log_files, delay, stop_at))
+        t = threading.Thread(
+            target=worker,
+            args=(target_queue, log_files, delay, stop_at, block_keywords),
+        )
         t.start()
         workers.append(t)
 
