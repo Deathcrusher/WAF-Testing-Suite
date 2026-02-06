@@ -13,7 +13,7 @@ import threading
 import time
 from queue import Queue
 
-from common import COMMON_PAYLOADS as PAYLOADS, thread_safe_log as log
+from common import COMMON_PAYLOADS as PAYLOADS, load_allowlist, thread_safe_log as log, validate_target
 
 BLOCK_KEYWORDS = ["blocked", "forbidden", "waf", "too many requests", "access denied"]
 
@@ -24,10 +24,12 @@ BLOCK_KEYWORDS = ["blocked", "forbidden", "waf", "too many requests", "access de
 def detect_waf_block(response_text: str) -> bool:
     return any(kw.lower() in response_text.lower() for kw in BLOCK_KEYWORDS)
 
-def test_rest_api(target, session, log_files, delay):
+def test_rest_api(target, session, log_files, delay, stop_at):
     url = target["url"]
     method = target["method"].upper()
     for payload in PAYLOADS:
+        if stop_at and time.time() >= stop_at:
+            break
         try:
             if method == "GET":
                 r = session.get(url, params={"test": payload}, timeout=5)
@@ -44,7 +46,7 @@ def test_rest_api(target, session, log_files, delay):
             log(log_files["error"], f"[ERROR] {url} | {e}")
         time.sleep(delay)
 
-def test_graphql_api(target, session, log_files, delay):
+def test_graphql_api(target, session, log_files, delay, stop_at):
     url = target["url"]
     queries = [
         {"query": "{ __schema { types { name } } }"},
@@ -52,6 +54,8 @@ def test_graphql_api(target, session, log_files, delay):
         {"query": '{ user(id:"1 OR 1=1") { id name } }'}
     ]
     for gql_payload in queries:
+        if stop_at and time.time() >= stop_at:
+            break
         try:
             headers = {"Content-Type": "application/json"}
             r = session.post(url, headers=headers, json=gql_payload, timeout=5)
@@ -63,27 +67,36 @@ def test_graphql_api(target, session, log_files, delay):
             log(log_files["error"], f"[ERROR] {url} | {e}")
         time.sleep(delay)
 
-def worker(target_queue, session, log_files, delay):
+def worker(target_queue, log_files, delay, stop_at):
+    session = requests.Session()
     while not target_queue.empty():
+        if stop_at and time.time() >= stop_at:
+            break
         try:
             target = target_queue.get_nowait()
         except Exception:
             break
         if target["type"] == "rest":
-            test_rest_api(target, session, log_files, delay)
+            test_rest_api(target, session, log_files, delay, stop_at)
         elif target["type"] == "graphql":
-            test_graphql_api(target, session, log_files, delay)
+            test_graphql_api(target, session, log_files, delay, stop_at)
 
-def parse_targets(args):
+def parse_targets(args, allowlist):
     targets = []
     if args.rest:
         for r in args.rest:
+            if ":" not in r:
+                raise ValueError(f"Invalid REST target '{r}'. Use METHOD:URL format.")
             method, url = r.split(":", 1)
+            validate_target(url, allowlist)
             targets.append({"url": url, "method": method, "type": "rest"})
     if args.graphql:
         for url in args.graphql:
+            validate_target(url, allowlist)
             targets.append({"url": url, "method": "POST", "type": "graphql"})
     if not targets:
+        if allowlist is not None:
+            raise ValueError("Allowlist provided but no targets specified.")
         targets = [
             {"url": "https://yourtargetdomain.com/api/user", "method": "GET", "type": "rest"},
             {"url": "https://yourtargetdomain.com/api/login", "method": "POST", "type": "rest"},
@@ -98,9 +111,15 @@ def main():
     parser.add_argument("--threads", type=int, default=5, help="Number of worker threads")
     parser.add_argument("--delay", type=float, default=0.3, help="Delay between requests")
     parser.add_argument("--logdir", default=".", help="Directory for log files")
+    parser.add_argument("--max-seconds", type=int, default=0, help="Maximum runtime in seconds")
+    parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
     args = parser.parse_args()
 
-    targets = parse_targets(args)
+    try:
+        allowlist = load_allowlist(args.allowlist)
+        targets = parse_targets(args, allowlist)
+    except ValueError as exc:
+        parser.error(str(exc))
     threads = args.threads
     delay = args.delay
     logdir = args.logdir
@@ -115,10 +134,10 @@ def main():
     for t in targets:
         target_queue.put(t)
 
-    session = requests.Session()
+    stop_at = time.time() + args.max_seconds if args.max_seconds > 0 else None
     workers = []
     for _ in range(threads):
-        t = threading.Thread(target=worker, args=(target_queue, session, log_files, delay))
+        t = threading.Thread(target=worker, args=(target_queue, log_files, delay, stop_at))
         t.start()
         workers.append(t)
 

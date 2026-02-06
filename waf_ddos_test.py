@@ -18,12 +18,15 @@ import argparse
 from datetime import datetime
 from contextlib import suppress
 
+from common import load_allowlist, validate_target
+
 TARGET_URL = ""
 THREAD_COUNT = 0
 REQUESTS_PER_THREAD = 0
 INSECURE_TLS = False
 LOG_BASENAME = "waf_stress_test"
 LOGGER = None
+STOP_AT = None
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -64,7 +67,12 @@ def parse_url(url: str):
     scheme = parsed.scheme or "http"
     port = parsed.port if parsed.port else (443 if scheme == "https" else 80)
     path = parsed.path if parsed.path else "/"
+    if not host:
+        raise ValueError(f"Invalid target URL: {url}")
     return host, port, path, scheme
+
+def should_stop() -> bool:
+    return STOP_AT is not None and time.time() >= STOP_AT
 
 # -------------------------
 # CONNECTION HANDLER
@@ -105,6 +113,9 @@ def _recv_status_line(sock: socket.socket) -> str:
 def http_flood():
     host, port, path, scheme = parse_url(TARGET_URL)
     for i in range(REQUESTS_PER_THREAD):
+        if should_stop():
+            LOGGER.info("http_flood stopping due to max runtime")
+            break
         s = None
         try:
             s = _connect(host, port, scheme)
@@ -135,6 +146,9 @@ def slowloris():
     host, port, path, scheme = parse_url(TARGET_URL)
     sockets = []
     for i in range(REQUESTS_PER_THREAD):
+        if should_stop():
+            LOGGER.info("slowloris stopping due to max runtime")
+            break
         s = None
         try:
             s = _connect(host, port, scheme)
@@ -156,6 +170,9 @@ def slowloris():
                     s.close()
 
     for idx, s in enumerate(sockets):
+        if should_stop():
+            LOGGER.info("slowloris stopping keepalive due to max runtime")
+            break
         with suppress(OSError):
             s.send(b"X-a: b\r\n")
         LOGGER.info(f"slowloris keepalive sent idx={idx} total={len(sockets)}")
@@ -170,7 +187,7 @@ def slowloris():
 # MAIN
 # -------------------------
 def main():
-    global TARGET_URL, THREAD_COUNT, REQUESTS_PER_THREAD, INSECURE_TLS, LOGGER
+    global TARGET_URL, THREAD_COUNT, REQUESTS_PER_THREAD, INSECURE_TLS, LOGGER, STOP_AT
 
     parser = argparse.ArgumentParser(description="WAF DDoS Stress Test Tool")
     parser.add_argument("--target", required=True, help="Target URL (e.g., https://example.com)")
@@ -178,12 +195,27 @@ def main():
     parser.add_argument("--rpt", type=int, default=100, help="Requests per thread")
     parser.add_argument("--logdir", default="./logs", help="Log directory")
     parser.add_argument("--insecure-tls", action="store_true", help="Disable TLS certificate verification")
+    parser.add_argument("--max-seconds", type=int, default=60, help="Maximum runtime in seconds")
+    parser.add_argument("--allowlist", help="Path to file containing allowed target hosts")
+    parser.add_argument(
+        "--ack",
+        action="store_true",
+        help="Acknowledge that you are authorized to run stress tests against the target",
+    )
     args = parser.parse_args()
+    if not args.ack:
+        parser.error("Refusing to run without --ack authorization flag.")
 
     TARGET_URL = args.target
+    try:
+        allowlist = load_allowlist(args.allowlist)
+        validate_target(TARGET_URL, allowlist)
+    except ValueError as exc:
+        parser.error(str(exc))
     THREAD_COUNT = args.threads
     REQUESTS_PER_THREAD = args.rpt
     INSECURE_TLS = args.insecure_tls
+    STOP_AT = time.time() + args.max_seconds if args.max_seconds > 0 else None
     LOGGER = _setup_logging(args.logdir)
 
     LOGGER.info(f"start target={TARGET_URL} threads={THREAD_COUNT} per_thread={REQUESTS_PER_THREAD}")

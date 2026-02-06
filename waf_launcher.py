@@ -31,6 +31,8 @@ THREADS = "100"
 REQUESTS_PER_THREAD = "100"
 LOGDIR = "./logs"
 INSECURE_TLS = False
+MAX_SECONDS = "60"
+ACK_AUTH = False
 
 # -------------------------
 # FUNCTIONS
@@ -43,7 +45,8 @@ def draw_menu(stdscr, selected_row_idx):
     header = f" WAF Control Center ".center(w, "=")
     params = (
         f"Target: {TARGET_URL} | Threads: {THREADS} | RPT: {REQUESTS_PER_THREAD} | "
-        f"Logdir: {LOGDIR} | TLS-Insecure: {INSECURE_TLS}"
+        f"Logdir: {LOGDIR} | TLS-Insecure: {INSECURE_TLS} | MaxSec: {MAX_SECONDS} | "
+        f"Ack: {ACK_AUTH}"
     )
     stdscr.addstr(0, 0, header, curses.color_pair(2))
     stdscr.addstr(1, 0, params, curses.color_pair(3))
@@ -73,7 +76,7 @@ def change_target(stdscr):
     curses.noecho()
 
 def change_options(stdscr):
-    global THREADS, REQUESTS_PER_THREAD, LOGDIR, INSECURE_TLS
+    global THREADS, REQUESTS_PER_THREAD, LOGDIR, INSECURE_TLS, MAX_SECONDS, ACK_AUTH
     curses.echo()
     stdscr.addstr(len(TOOLS)+4, 0, "Threads: ")
     THREADS = stdscr.getstr().decode().strip() or THREADS
@@ -83,6 +86,10 @@ def change_options(stdscr):
     LOGDIR = stdscr.getstr().decode().strip() or LOGDIR
     stdscr.addstr(len(TOOLS)+7, 0, "Insecure TLS? (y/N): ")
     INSECURE_TLS = stdscr.getstr().decode().strip().lower() == "y"
+    stdscr.addstr(len(TOOLS)+8, 0, "Max seconds: ")
+    MAX_SECONDS = stdscr.getstr().decode().strip() or MAX_SECONDS
+    stdscr.addstr(len(TOOLS)+9, 0, "Ack authorized? (y/N): ")
+    ACK_AUTH = stdscr.getstr().decode().strip().lower() == "y"
     curses.noecho()
 
 def run_tool(stdscr, tool):
@@ -107,6 +114,10 @@ def run_tool(stdscr, tool):
         ])
         if INSECURE_TLS:
             cmd.append("--insecure-tls")
+        if tool["script"] == "waf_ddos_test.py":
+            cmd.extend(["--max-seconds", MAX_SECONDS])
+            if ACK_AUTH:
+                cmd.append("--ack")
 
     try:
         os.makedirs(LOGDIR, exist_ok=True)
